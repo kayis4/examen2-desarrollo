@@ -26,7 +26,20 @@ export const obtenerToken = () => token.value;
 
 /** TODO [M2] Borrar token y usuario de la memoria (refs) y del almacenamiento cifrado. */
 export async function olvidarSesion() {
-  // TODO [M2]
+  token.value = null;
+  usuario.value = null;
+
+  try {
+    await SecureStorage.remove(CLAVE_TOKEN);
+  } catch {
+    // Ignorar si no existía la clave en SecureStorage
+  }
+
+  try {
+    await SecureStorage.remove(CLAVE_USUARIO);
+  } catch {
+    // Ignorar si no existía la clave en SecureStorage
+  }
 }
 
 export function useAuth() {
@@ -41,8 +54,19 @@ export function useAuth() {
    *  No atrape el error: LoginPage.vue ya muestra los 422.
    */
   async function login(email: string, password: string) {
-    void [email, password, api, Device, SecureStorage, CLAVE_TOKEN, CLAVE_USUARIO];
-    throw new Error('TODO [M2] login sin implementar');
+    const info = await Device.getInfo();
+    const device_name = `${info.platform} ${info.model}`.trim().slice(0, 60);
+
+    const data = await api<{ token: string; usuario: Usuario }>('/login', {
+      method: 'POST',
+      body: { email, password, device_name },
+    });
+
+    token.value = data.token;
+    usuario.value = data.usuario;
+
+    await SecureStorage.set(CLAVE_TOKEN, data.token);
+    await SecureStorage.set(CLAVE_USUARIO, JSON.stringify(data.usuario));
   }
 
   /**
@@ -51,7 +75,26 @@ export function useAuth() {
    *  Debe ejecutarse una sola vez (use la bandera tokenCargado).
    */
   async function cargarToken() {
-    void tokenCargado;
+    if (tokenCargado) return;
+    tokenCargado = true;
+
+    try {
+      const guardadoToken = await SecureStorage.get(CLAVE_TOKEN);
+      token.value = typeof guardadoToken === 'string' ? guardadoToken : null;
+    } catch {
+      token.value = null;
+    }
+
+    try {
+      const guardadoUsuario = await SecureStorage.get(CLAVE_USUARIO);
+      if (typeof guardadoUsuario === 'string' && guardadoUsuario.length > 0) {
+        usuario.value = JSON.parse(guardadoUsuario) as Usuario;
+      } else {
+        usuario.value = null;
+      }
+    } catch {
+      usuario.value = null;
+    }
   }
 
   /**
@@ -60,7 +103,13 @@ export function useAuth() {
    *  aunque la API falle (sin red o token vencido).
    */
   async function cerrarSesion() {
-    // TODO [M2]
+    try {
+      await api('/logout', { method: 'POST' });
+    } catch {
+      // Aunque falle la red o el token esté vencido, siempre se limpia la sesión local
+    } finally {
+      await olvidarSesion();
+    }
   }
 
   return { usuario, estaAutenticado, login, cargarToken, cerrarSesion };
